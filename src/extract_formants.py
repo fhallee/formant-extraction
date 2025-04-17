@@ -1,4 +1,5 @@
 import argparse
+import os
 import numpy as np
 import pandas as pd
 import parselmouth
@@ -23,32 +24,33 @@ def extract_formants_from_file(audio_file_path, textgrid_file_path, phone, desir
 
     formant_list = []
 
-    # add argument validation - if desired_formants has anything other than 1-4 or points isnt within 0 and 1 then reject it
+    # TODO: add argument validation - if desired_formants has anything other than 1-4 or points isnt within 0 and 1 then reject it
+    # TODO: add file name in formant_dict
     for tier_name, tier in grid.items():
         if "phones" in tier_name:
             speaker_name = tier_name.replace("- phones", "").strip()
-            for interval in tier:
+            for i, interval in enumerate(tier):
                 if interval.text == phone:
-                    for formant in desired_formants:
+                    for formant_number in desired_formants:
                         for point in points:
                             formant_dict = {
                                 "speaker": speaker_name,
                                 "phone": phone,
+                                "preceding_phone": tier[i-1].text if i > 0 else None,
+                                "following_phone": tier[i+1].text if i < len(tier) - 1 else None,
                                 "point": point,
                                 "interval_start": interval.xmin,
                                 "interval_end": interval.xmax
                             }
-                            formant_index = formant
-                            formant_value = formants.get_value_at_time(formant_index, (interval.xmax - interval.xmin)*point)
-                            if np.isnan(formant_value):
-                                continue
-                            formant_dict[f"F{formant}"] = formant_value
+                            formant_value = formants.get_value_at_time(int(formant_number), (interval.xmax - interval.xmin)*point)
+                            formant_dict[f"F{formant_number}"] = formant_value
                             formant_list.append(formant_dict)
 
+    # TODO : add print statement that the file has been processed
+    # TODO : return list and have it converted to DF in 
     return pd.DataFrame(formant_list)
 
-
-    # iterate through tiers of the grid (the keys in a TextGrid dict) and pick out any that have "phones". speaker name is gonna be the name of the tier minus "- phones. be sure to include this in the documentation. note in in the readme.md for now"
+# TODO: add "normalize" function w/ command line option
 
 def main():
     parser = argparse.ArgumentParser(description="Extracts formants from audio files")
@@ -78,11 +80,11 @@ def main():
     )
     parser.add_argument(
         "--formants",
-        type=str,
+        type=int,
         nargs='+',
-        choices=["f1", "f2", "f3", "f4"],
+        choices=[1, 2, 3, 4],
         required=True,
-        help="Specify which formants to extract (e.g., f1 f2)"
+        help="Specify which formants to extract (e.g., 1 2)"
     )
     parser.add_argument(
         "--points",
@@ -96,6 +98,32 @@ def main():
 
     if len(args.points) > 3:
         parser.error("You can specify up to 3 measurement points only.")
+
+    # TODO : add handling if one file doesnt match but the rest do
+    audio_files = {os.path.splitext(f)[0]: os.path.join(args.audio_path, f) for f in os.listdir(args.audio_path) if f.endswith(".wav")}
+    textgrid_files = {os.path.splitext(f)[0]: os.path.join(args.textgrids_path, f) for f in os.listdir(args.textgrids_path) if f.endswith(".TextGrid")}
+
+    matched_files = set(audio_files.keys()) & set(textgrid_files.keys())
+    if not matched_files:
+        raise ValueError("No matching audio and TextGrid files found in the provided directories.")
+
+    all_formant_data = []
+    for file_name in matched_files:
+        audio_file_path = audio_files[file_name]
+        textgrid_file_path = textgrid_files[file_name]
+        df = extract_formants_from_file(
+            audio_file_path=audio_file_path,
+            textgrid_file_path=textgrid_file_path,
+            phone=args.phone,
+            desired_formants=args.formants,
+            points=args.points
+        )
+        all_formant_data.append(df)
+
+    final_df = pd.concat(all_formant_data, ignore_index=True)
+
+    final_df.to_csv(args.output, index=False)
+    print(f"Formant data saved to {args.output}")
 
 if __name__ == "__main__":
     main()
